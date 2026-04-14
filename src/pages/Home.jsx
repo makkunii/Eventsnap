@@ -17,11 +17,11 @@ const Home = ({ onSelect }) => (
       
       {/* Title: Scaled down for mobile (text-6xl) and up for desktop (md:text-8xl) */}
       <h1 className="text-5xl md:text-7xl font-black italic tracking-tighter text-white leading-[0.85]">
-        EVENT<span className="text-blue-600">SNAP</span>
+        SNAP<span className="text-blue-600">SHARE</span>
       </h1>
       
       <p className="text-zinc-500 max-w-[280px] md:max-w-xs mx-auto text-xs md:text-sm font-medium leading-relaxed">
-        Capture and stream moments directly to the big screen. No app install required.
+       Turn your event into a live, interactive gallery where everyone can be the photographer.
       </p>
     </div>
 
