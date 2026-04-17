@@ -18,27 +18,24 @@ const HostDashboard = ({ onBack }) => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [isLocked, setIsLocked] = useState(false);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedIndices, setSelectedIndices] = useState([]);
+  
   const lastProcessedRef = useRef(null);
-
   const { peerId, incomingData, connections, sendData } = usePeer(true, hostId, isLocked);
 
   useEffect(() => {
     if (connections.length > 0) {
       connections.forEach(conn => {
-        if (conn.open) {
-          conn.send({ type: 'LOCK_UPDATE', isLocked });
-        }
+        if (conn.open) conn.send({ type: 'LOCK_UPDATE', isLocked });
       });
     }
   }, [isLocked, connections]);
 
   const handleTerminate = () => {
     connections.forEach(conn => {
-      if (conn.open) {
-        conn.send({ type: 'SESSION_TERMINATED' });
-      }
+      if (conn.open) conn.send({ type: 'SESSION_TERMINATED' });
     });
-    
     setTimeout(() => {
       localStorage.removeItem('activeEventCode');
       localStorage.removeItem(`gallery_${hostId}`);
@@ -46,148 +43,215 @@ const HostDashboard = ({ onBack }) => {
     }, 800);
   };
 
-  // ✅ FIXED LOGIC HERE
+  const handleBatchDownload = () => {
+    selectedIndices.forEach((index, i) => {
+      const item = gallery[index];
+      const link = document.createElement('a');
+      link.href = item;
+      link.download = `event-snap-${index}.png`;
+      document.body.appendChild(link);
+      setTimeout(() => {
+        link.click();
+        document.body.removeChild(link);
+      }, i * 200);
+    });
+    setIsSelectionMode(false);
+    setSelectedIndices([]);
+  };
+
+  const toggleSelectItem = (index) => {
+    setSelectedIndices(prev => 
+      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+    );
+  };
+
   useEffect(() => {
     if (!incomingData || incomingData === lastProcessedRef.current) return;
-
     const isObject = typeof incomingData === 'object' && incomingData.type;
-    if (!isObject) return;
+    if (!isObject || incomingData.type === 'GUEST_JOIN') return;
 
-    const { type, data, peerId: senderId } = incomingData;
-
-    // Ignore joins
-    if (type === 'GUEST_JOIN') return;
-
-    // 🚨 If locked → reject immediately
     if (isLocked) {
-      if (senderId) {
-        sendData(senderId, { type: 'EVENT_LOCKED' });
-      }
+      if (incomingData.peerId) sendData(incomingData.peerId, { type: 'EVENT_LOCKED' });
       return;
     }
 
-    // ✅ Normal flow
     lastProcessedRef.current = incomingData;
-
     setGallery(prev => {
-      const updated = [data, ...prev];
-      localStorage.setItem(`gallery_${hostId}`, JSON.stringify(updated));
+      const updated = [incomingData.data, ...prev];
+      try { localStorage.setItem(`gallery_${hostId}`, JSON.stringify(updated)); } catch (e) {}
       return updated;
     });
 
-    if (senderId) {
-      sendData(senderId, { type: 'MEDIA_RECEIVED' });
-    }
-
+    if (incomingData.peerId) sendData(incomingData.peerId, { type: 'MEDIA_RECEIVED' });
   }, [incomingData, hostId, sendData, isLocked]);
 
   return (
-    <div className="fixed inset-0 bg-zinc-950 text-zinc-100 overflow-y-auto selection:bg-blue-500/30">
-      <div className="min-h-full p-4 md:p-8 w-full max-w-7xl mx-auto pb-32">
-        <div className="flex justify-between items-center mb-12">
+    <div className="fixed inset-0 bg-[#050505] text-zinc-100 overflow-y-auto selection:bg-blue-500/30 font-sans tracking-tight">
+      {/* Dynamic Background Glow */}
+      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-[500px] bg-blue-600/10 blur-[120px] pointer-events-none" />
+
+      <div className="min-h-full p-4 md:p-12 w-full max-w-7xl mx-auto pb-48">
+        
+        {/* Header Section */}
+        <header className="flex items-center justify-between mb-16 relative z-10">
           <button 
-            type="button"
             onClick={() => onBack ? onBack() : window.location.href = '/'} 
-            className="text-zinc-500 hover:text-white transition-colors flex items-center gap-2 text-sm font-bold uppercase tracking-widest cursor-pointer relative z-50"
+            className="group flex items-center gap-3 bg-white/5 border border-white/10 px-5 py-2.5 rounded-2xl backdrop-blur-md hover:bg-white/10 transition-all active:scale-95"
           >
-            <span>←</span> Lobby
+            <span className="text-zinc-500 group-hover:text-white transition-colors">←</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Lobby</span>
           </button>
           
-          <div className="flex gap-4">
+          <div className="flex items-center gap-2 bg-black/40 border border-white/5 p-1.5 rounded-3xl backdrop-blur-2xl">
+            <button 
+              onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIndices([]); }}
+              className={`px-5 py-2 rounded-2xl font-black text-[9px] uppercase tracking-widest transition-all ${isSelectionMode ? 'bg-blue-600 text-white shadow-lg' : 'text-zinc-500 hover:text-white'}`}
+            >
+              {isSelectionMode ? 'Cancel' : 'Select'}
+            </button>
             <button 
               onClick={() => setIsLocked(!isLocked)}
-              className={`px-6 py-2.5 rounded-full border font-black text-[10px] transition-all uppercase tracking-widest flex items-center gap-2 cursor-pointer active:scale-95 ${
-                isLocked 
-                  ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_20px_rgba(37,99,235,0.4)]' 
-                  : 'border-zinc-800 text-zinc-500 hover:bg-zinc-900'
-              }`}
+              className={`px-5 py-2 rounded-2xl font-black text-[9px] uppercase tracking-widest transition-all ${isLocked ? 'bg-zinc-800 text-orange-500' : 'text-zinc-500 hover:text-white'}`}
             >
-              {isLocked ? '🔓 Resume' : '🔒 Lock'}
+              {isLocked ? 'Locked' : 'Lock'}
             </button>
-
-            <button onClick={() => setShowEndConfirm(true)} className="px-4 py-2.5 rounded-full border border-red-900/30 text-red-500/70 text-[10px] font-black hover:bg-red-600 hover:text-white transition-all uppercase tracking-widest cursor-pointer">
-              End Event
+            <button 
+              onClick={() => setShowEndConfirm(true)}
+              className="px-5 py-2 rounded-2xl font-black text-[9px] uppercase tracking-widest text-red-500/50 hover:text-red-500 hover:bg-red-500/10 transition-all"
+            >
+              End
             </button>
           </div>
-        </div>
+        </header>
 
-        <div className="relative mb-20 text-center flex flex-col items-center">
-          {isLocked && (
-            <span className="mb-4 bg-blue-600 text-white text-[9px] font-black px-4 py-1.5 rounded-full animate-bounce shadow-xl uppercase tracking-tighter z-20">
-              Session Frozen
-            </span>
-          )}
-          <div className="relative">
-            <div className={`absolute inset-0 blur-[100px] rounded-full transition-all duration-1000 ${isLocked ? 'bg-zinc-800/20' : 'bg-blue-600/20'}`} />
-            <h2 className="text-zinc-600 text-[10px] font-black uppercase tracking-[0.5em] mb-4 relative">Live Event Code</h2>
-            <p className={`text-7xl md:text-9xl font-black tracking-tighter drop-shadow-2xl transition-all duration-500 relative ${isLocked ? 'text-zinc-700 scale-95' : 'text-white'}`}>
-              {peerId || "..." }
+        {/* Hero Display */}
+        <section className="relative mb-24 text-center">
+          <div className="inline-block relative">
+            <h2 className="text-zinc-600 text-[10px] font-black uppercase tracking-[0.6em] mb-4">Event Signal</h2>
+            <p className={`text-7xl md:text-[10rem] font-black tracking-[ -0.05em] leading-none transition-all duration-700 ${isLocked ? 'text-zinc-800 blur-sm scale-90' : 'text-white drop-shadow-[0_0_40px_rgba(255,255,255,0.1)]'}`}>
+              {peerId || "LOADING"}
             </p>
+            {!isLocked && <div className="absolute -inset-2 bg-gradient-to-r from-blue-500/0 via-white/10 to-blue-500/0 h-px bottom-0 animate-shimmer" />}
           </div>
 
-          <div className="flex items-center gap-3 mt-8 bg-zinc-900/80 border border-zinc-800 px-6 py-2 rounded-full backdrop-blur-md relative">
-            <div className={`w-2.5 h-2.5 rounded-full ${isLocked ? 'bg-orange-500' : 'bg-green-500 animate-pulse'}`} />
-            <span className="text-sm font-mono text-zinc-300 uppercase tracking-widest">
-              {gallery.length} Snaps {isLocked ? '(VIEW ONLY)' : 'LIVE'}
-            </span>
+          <div className="flex items-center justify-center gap-6 mt-12">
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Status</span>
+              <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 border border-white/5">
+                <div className={`w-1.5 h-1.5 rounded-full ${isLocked ? 'bg-orange-500' : 'bg-green-500 animate-pulse'}`} />
+                <span className="text-[10px] font-mono text-zinc-300 uppercase">{isLocked ? 'Frozen' : 'Live'}</span>
+              </div>
+            </div>
+            <div className="w-px h-8 bg-white/10" />
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Captured</span>
+              <span className="text-xl font-black text-white">{gallery.length}</span>
+            </div>
           </div>
-        </div>
+        </section>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {/* Grid Display */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-8">
           {gallery.map((item, i) => {
             const isVideo = item && item.startsWith('data:video');
+            const isSelected = selectedIndices.includes(i);
             return (
               <div 
                 key={`${hostId}-${i}`} 
-                onClick={() => setSelectedItem(item)} 
-                className={`group relative aspect-[3/4] rounded-[2.5rem] overflow-hidden bg-zinc-900 border border-zinc-800 cursor-pointer transition-all duration-500 hover:ring-8 hover:ring-blue-600/10 hover:-translate-y-2 shadow-2xl ${
-                  isLocked ? 'opacity-80 grayscale-[0.3]' : 'opacity-100'
-                }`}
+                onClick={() => isSelectionMode ? toggleSelectItem(i) : setSelectedItem(item)} 
+                className={`group relative aspect-[10/14] rounded-[2rem] md:rounded-[3rem] overflow-hidden bg-zinc-900 border transition-all duration-500 ${
+                  isSelected ? 'ring-4 ring-blue-600 scale-[0.96] z-20' : 'border-white/5'
+                } ${isSelectionMode ? 'cursor-default' : 'cursor-pointer hover:border-white/20 hover:-translate-y-2'}`}
               >
                 {isVideo ? (
-                  <video src={item} className="h-full w-full object-cover" muted loop onMouseOver={e => e.target.play()} onMouseOut={e => e.target.pause()} />
+                  <video src={item} className="h-full w-full object-cover" muted loop playsInline onMouseOver={e => e.target.play()} onMouseOut={e => e.target.pause()} />
                 ) : (
-                  <img src={item} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" alt="" />
+                  <img src={item} className="h-full w-full object-cover transition-transform duration-1000 group-hover:scale-110" alt="" />
                 )}
-                <div className="absolute top-5 left-5 z-20 flex gap-2">
-                  <div className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border border-white/10 shadow-xl backdrop-blur-lg ${isVideo ? 'bg-red-600/90 text-white' : 'bg-black/60 text-zinc-300'}`}>
-                    {isVideo ? 'VIDEO' : 'IMAGE'}
+                
+                {/* Visual Identity Overlay */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+                
+                <div className="absolute top-4 left-4 flex gap-2">
+                  <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest backdrop-blur-md border border-white/10 ${isVideo ? 'bg-red-500 text-white' : 'bg-white/10 text-white'}`}>
+                    {isVideo ? 'Motion' : 'Static'}
                   </div>
                 </div>
+
+                {isSelectionMode && (
+                  <div className={`absolute inset-0 flex items-center justify-center transition-all ${isSelected ? 'bg-blue-600/20' : 'bg-black/40'}`}>
+                    <div className={`w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-white border-white' : 'border-white/40'}`}>
+                      {isSelected && <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       </div>
 
-      {selectedItem && (
-        <div className="fixed inset-0 z-[250] bg-black/98 backdrop-blur-3xl flex items-center justify-center p-6 md:p-12" onClick={() => setSelectedItem(null)}>
-          <div className="relative max-w-5xl w-full h-full flex flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
-             {selectedItem.startsWith('data:video') ? (
-               <video src={selectedItem} className="max-h-[75vh] w-auto rounded-3xl" controls autoPlay loop />
-             ) : (
-               <img src={selectedItem} className="max-h-[75vh] w-auto rounded-3xl object-contain" alt="" />
-             )}
-             <div className="mt-12 flex gap-4">
-               <a href={selectedItem} download={`snap-${Date.now()}`} className="bg-white text-black px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-105 transition-transform">Download</a>
-               <button onClick={() => setSelectedItem(null)} className="bg-zinc-800 text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest">Close</button>
+      {/* Floating Batch Action Bar */}
+      {isSelectionMode && selectedIndices.length > 0 && (
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[200] w-[calc(100%-2rem)] max-w-md bg-white text-black p-2 rounded-[2rem] flex items-center justify-between shadow-[0_30px_60px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom-10">
+            <div className="pl-6">
+                <p className="text-[10px] font-black uppercase tracking-tighter">Ready to Export</p>
+                <p className="text-[9px] font-bold text-zinc-500 uppercase">{selectedIndices.length} items</p>
+            </div>
+            <button 
+                onClick={handleBatchDownload}
+                className="bg-blue-600 text-white px-8 py-4 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all"
+            >
+                Download Bundle
+            </button>
+        </div>
+      )}
+
+      {/* Fullscreen Preview */}
+      {selectedItem && !isSelectionMode && (
+        <div className="fixed inset-0 z-[250] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 md:p-12 animate-in fade-in" onClick={() => setSelectedItem(null)}>
+          <div className="relative max-w-4xl w-full h-full flex flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
+             <div className="w-full h-[70vh] rounded-[3rem] overflow-hidden border border-white/10 bg-zinc-900 shadow-3xl">
+                {selectedItem.startsWith('data:video') ? (
+                  <video src={selectedItem} className="w-full h-full object-contain" controls autoPlay loop playsInline />
+                ) : (
+                  <img src={selectedItem} className="w-full h-full object-contain" alt="" />
+                )}
+             </div>
+             <div className="mt-10 flex gap-4 w-full max-w-sm">
+               <a href={selectedItem} download className="flex-1 bg-white text-black py-5 rounded-[2rem] font-black text-[10px] uppercase tracking-widest text-center hover:scale-105 transition-transform">Save to Device</a>
+               <button onClick={() => setSelectedItem(null)} className="flex-1 bg-white/5 border border-white/10 text-white py-5 rounded-[2rem] font-black text-[10px] uppercase tracking-widest hover:bg-white/10">Dismiss</button>
              </div>
           </div>
         </div>
       )}
 
+      {/* End Session Confirmation */}
       {showEndConfirm && (
-        <div className="fixed inset-0 z-[300] bg-zinc-950/80 backdrop-blur-md flex items-center justify-center p-6">
-          <div className="bg-zinc-900 border-2 border-red-500/20 p-12 rounded-[3rem] max-w-md w-full text-center">
-            <h3 className="text-3xl font-black text-white uppercase italic tracking-tighter">Terminate?</h3>
-            <p className="text-zinc-500 mt-4 text-sm font-medium leading-relaxed">This will wipe all items. Irreversible.</p>
-            <div className="mt-10 flex flex-col gap-3">
-              <button onClick={handleTerminate} className="bg-red-600 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-lg">Destroy Session</button>
-              <button onClick={() => setShowEndConfirm(false)} className="text-zinc-500 font-bold py-2 uppercase text-[10px] tracking-widest cursor-pointer">Cancel</button>
+        <div className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-xl flex items-center justify-center p-6 animate-in zoom-in-95">
+          <div className="bg-[#111] border border-white/5 p-10 rounded-[3.5rem] max-w-sm w-full text-center shadow-3xl">
+            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </div>
+            <h3 className="text-2xl font-black text-white uppercase tracking-tighter italic mb-2">Wipe Session?</h3>
+            <p className="text-zinc-500 text-xs font-medium leading-relaxed mb-8 px-4">All captured media will be permanently deleted from the cloud and storage.</p>
+            <div className="flex flex-col gap-3">
+              <button onClick={handleTerminate} className="bg-red-500 text-white py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px]">Destroy Everything</button>
+              <button onClick={() => setShowEndConfirm(false)} className="text-zinc-500 font-bold py-2 uppercase text-[9px] tracking-widest">Keep Session</button>
             </div>
           </div>
         </div>
       )}
+
+      <style jsx>{`
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+        .animate-shimmer {
+          animation: shimmer 3s infinite linear;
+        }
+      `}</style>
     </div>
   );
 };
