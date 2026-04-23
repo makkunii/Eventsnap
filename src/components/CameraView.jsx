@@ -1,17 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useCamera } from '../hooks/useCamera';
 
-const CameraView = ({ onSend, isLocked, facingMode, onToggleCamera }) => {
-  const { 
+const CameraView = ({ onSend, isLocked, facingMode, onToggleCamera, snapLimit, snapCount }) => {
+  const {
     videoRef, photo, setPhoto, videoBlob, setVideoBlob,
     isRecording, startRecording, stopRecording,
     hasPermission, requestPermission, takePhoto
   } = useCamera(facingMode);
 
   const [isSending, setIsSending] = useState(false);
-  const isSendingRef = useRef(false); 
+  const isSendingRef = useRef(false);
   const holdTimerRef = useRef(null);
   const [progress, setProgress] = useState(0);
+
+  // Whether the guest has exhausted their snap limit
+  const isLimitReached = snapLimit !== null && snapLimit !== undefined && snapCount >= snapLimit;
+
+  // Treat limit-reached the same as locked for capture purposes
+  const captureBlocked = isLocked || isLimitReached;
 
   useEffect(() => {
     requestPermission();
@@ -33,12 +39,12 @@ const CameraView = ({ onSend, isLocked, facingMode, onToggleCamera }) => {
   }, [isRecording]);
 
   const handlePressStart = () => {
-    if (isLocked) return; 
+    if (captureBlocked) return;
     holdTimerRef.current = setTimeout(() => startRecording(), 250);
   };
 
   const handlePressEnd = () => {
-    if (isLocked) return;
+    if (captureBlocked) return;
     if (holdTimerRef.current) {
       clearTimeout(holdTimerRef.current);
       holdTimerRef.current = null;
@@ -60,12 +66,19 @@ const CameraView = ({ onSend, isLocked, facingMode, onToggleCamera }) => {
 
     const link = document.createElement('a');
     link.href = dataToSave;
-    // This creates a unique filename like snappulse_1712345678.jpg
     link.download = `snappulse_${Date.now()}.${photo ? 'jpg' : 'mp4'}`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
+
+  // Snap counter label: "X/Y" or "0/∞"
+  const snapCounterLabel = (() => {
+    if (snapLimit === null || snapLimit === undefined) {
+      return `${snapCount}/∞`;
+    }
+    return `${snapCount}/${snapLimit}`;
+  })();
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col items-center overflow-hidden touch-none font-sans">
@@ -73,28 +86,39 @@ const CameraView = ({ onSend, isLocked, facingMode, onToggleCamera }) => {
         <>
           {/* Main Camera Feed */}
           <div className="absolute inset-0 z-0">
-            <video 
-              ref={videoRef} 
-              autoPlay 
-              playsInline 
-              muted 
-              className={`h-full w-full object-cover transition-opacity duration-700 ${facingMode === 'user' ? '-scale-x-100' : ''} ${isLocked ? 'opacity-40 grayscale' : 'opacity-100'}`} 
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`h-full w-full object-cover transition-opacity duration-700 ${facingMode === 'user' ? '-scale-x-100' : ''} ${captureBlocked ? 'opacity-40 grayscale' : 'opacity-100'}`}
             />
           </div>
 
           {/* Vignette Overlay */}
           <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/60 pointer-events-none" />
-          
+
+          {/* Snap Counter — top right */}
+          <div className="absolute top-16 right-6 z-30">
+            <div className={`px-4 py-2 rounded-2xl backdrop-blur-md border text-[11px] font-black font-mono tracking-widest transition-all ${
+              isLimitReached
+                ? 'bg-red-500/20 border-red-500/40 text-red-400'
+                : 'bg-white/5 border-white/10 text-white/60'
+            }`}>
+              {snapCounterLabel}
+            </div>
+          </div>
+
           {/* Controls HUD */}
           <div className="absolute bottom-12 flex flex-col items-center w-full z-20">
             <p className="text-white/40 text-[9px] font-black uppercase tracking-[0.4em] mb-8 animate-pulse">
-              {isRecording ? 'Recording Motion' : isLocked ? 'Camera Locked' : 'Tap for Photo • Hold for Video'}
+              {isRecording ? 'Recording Motion' : isLimitReached ? 'Snap Limit Reached' : isLocked ? 'Camera Locked' : 'Tap for Photo • Hold for Video'}
             </p>
 
             <div className="flex items-center justify-between w-full px-12 max-w-md">
               {/* Flash/Options Placeholder */}
               <div className="w-14 h-14 rounded-full bg-black/20 backdrop-blur-md border border-white/5 flex items-center justify-center">
-                 <div className="w-1.5 h-1.5 bg-white/20 rounded-full" />
+                <div className="w-1.5 h-1.5 bg-white/20 rounded-full" />
               </div>
 
               {/* Master Capture Button */}
@@ -119,22 +143,22 @@ const CameraView = ({ onSend, isLocked, facingMode, onToggleCamera }) => {
                   />
                 </svg>
 
-                <button 
+                <button
                   onMouseDown={handlePressStart} onMouseUp={handlePressEnd}
                   onTouchStart={(e) => { e.preventDefault(); handlePressStart(); }}
                   onTouchEnd={(e) => { e.preventDefault(); handlePressEnd(); }}
                   className={`relative z-10 w-20 h-20 rounded-full border-[4px] transition-all duration-300 active:scale-90 shadow-[0_0_30px_rgba(0,0,0,0.5)] ${
-                    isLocked 
-                    ? 'bg-zinc-900 border-zinc-800' 
-                    : isRecording 
-                      ? 'bg-red-500 border-white scale-125' 
-                      : 'bg-white border-white/20'
+                    captureBlocked
+                      ? 'bg-zinc-900 border-zinc-800'
+                      : isRecording
+                        ? 'bg-red-500 border-white scale-125'
+                        : 'bg-white border-white/20'
                   }`}
                 />
               </div>
 
               {/* Flip Camera Button */}
-              <button 
+              <button
                 onClick={onToggleCamera}
                 className="w-14 h-14 bg-white/10 backdrop-blur-xl border border-white/20 rounded-full flex items-center justify-center active:rotate-180 transition-all duration-500 hover:bg-white/20"
               >
@@ -152,28 +176,28 @@ const CameraView = ({ onSend, isLocked, facingMode, onToggleCamera }) => {
         /* Preview State */
         <div className="relative h-full w-full bg-black flex flex-col items-center animate-in fade-in zoom-in-95 duration-500">
           <div className="w-full h-full p-4 pt-20 pb-55">
-             <div className="relative w-full h-full rounded-[3rem] overflow-hidden bg-zinc-900 shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/10">
-               {photo ? (
-                 <img src={photo} className={`h-full w-full object-cover ${facingMode === 'user' ? '-scale-x-100' : ''}`} alt="" />
-               ) : (
-                 <video src={videoBlob} autoPlay loop playsInline className={`h-full w-full object-cover ${facingMode === 'user' ? '-scale-x-100' : ''}`} />
-               )}
-               
-               {/* Label Overlay */}
-               <div className="absolute top-6 left-6 px-4 py-1.5 bg-black/40 backdrop-blur-md rounded-full border border-white/10">
-                  <p className="text-[10px] font-black text-white uppercase tracking-widest">
-                    {photo ? 'Static Preview' : 'Motion Preview'}
-                  </p>
-               </div>
-             </div>
+            <div className="relative w-full h-full rounded-[3rem] overflow-hidden bg-zinc-900 shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/10">
+              {photo ? (
+                <img src={photo} className={`h-full w-full object-cover ${facingMode === 'user' ? '-scale-x-100' : ''}`} alt="" />
+              ) : (
+                <video src={videoBlob} autoPlay loop playsInline className={`h-full w-full object-cover ${facingMode === 'user' ? '-scale-x-100' : ''}`} />
+              )}
+
+              {/* Label Overlay */}
+              <div className="absolute top-6 left-6 px-4 py-1.5 bg-black/40 backdrop-blur-md rounded-full border border-white/10">
+                <p className="text-[10px] font-black text-white uppercase tracking-widest">
+                  {photo ? 'Static Preview' : 'Motion Preview'}
+                </p>
+              </div>
+            </div>
           </div>
-          
+
           {/* Action Drawer */}
           <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/90 to-transparent p-10 flex flex-col items-center">
-            
-            {/* --- NEW SAVE BUTTON --- */}
+
+            {/* Save Button */}
             {!isSending && !isLocked && (
-              <button 
+              <button
                 onClick={saveToDevice}
                 className="mb-6 flex items-center gap-2 text-white/40 hover:text-white transition-all text-[10px] font-black uppercase tracking-[0.3em] group active:scale-95"
               >
@@ -186,14 +210,14 @@ const CameraView = ({ onSend, isLocked, facingMode, onToggleCamera }) => {
               </button>
             )}
 
-            <button 
-              onClick={async (e) => { 
+            <button
+              onClick={async (e) => {
                 if (e) { e.stopPropagation(); e.preventDefault(); }
                 if (isSendingRef.current || isLocked) return;
                 isSendingRef.current = true;
-                setIsSending(true); 
+                setIsSending(true);
                 try {
-                  await onSend(photo || videoBlob); 
+                  await onSend(photo || videoBlob);
                 } catch (err) {
                   isSendingRef.current = false;
                   setIsSending(false);
@@ -201,9 +225,9 @@ const CameraView = ({ onSend, isLocked, facingMode, onToggleCamera }) => {
               }}
               disabled={isSending || isLocked}
               className={`w-full max-w-sm py-6 rounded-3xl font-black text-xs uppercase tracking-[0.2em] flex items-center justify-center gap-4 transition-all shadow-2xl overflow-hidden group relative ${
-                isSending || isLocked 
-                ? 'bg-zinc-800 text-zinc-500 pointer-events-none' 
-                : 'bg-white text-black active:scale-[0.95]'
+                isSending || isLocked
+                  ? 'bg-zinc-800 text-zinc-500 pointer-events-none'
+                  : 'bg-white text-black active:scale-[0.95]'
               }`}
             >
               {isSending ? (
@@ -222,8 +246,8 @@ const CameraView = ({ onSend, isLocked, facingMode, onToggleCamera }) => {
               )}
             </button>
 
-            <button 
-              onClick={handleDiscard} 
+            <button
+              onClick={handleDiscard}
               disabled={isSending}
               className={`mt-6 text-zinc-500 font-black text-[9px] uppercase tracking-[0.4em] py-2 transition-all hover:text-red-500 ${isSending ? 'opacity-0' : 'opacity-100'}`}
             >

@@ -20,7 +20,15 @@ const HostDashboard = ({ onBack }) => {
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIndices, setSelectedIndices] = useState([]);
-  
+
+  // Snap Limit State — persisted per hostId
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [snapLimit, setSnapLimit] = useState(() => {
+    const saved = localStorage.getItem(`snapLimit_${localStorage.getItem('activeEventCode')}`);
+    return saved !== null ? Number(saved) : '';
+  });
+  const [limitInput, setLimitInput] = useState('');
+
   const lastProcessedRef = useRef(null);
   const { peerId, incomingData, connections, sendData } = usePeer(true, hostId, isLocked);
 
@@ -32,6 +40,54 @@ const HostDashboard = ({ onBack }) => {
     }
   }, [isLocked, connections]);
 
+  // Broadcast snap limit whenever a new guest connects
+  useEffect(() => {
+    if (connections.length > 0) {
+      connections.forEach(conn => {
+        if (conn.open) {
+          conn.send({
+            type: 'SNAP_LIMIT_UPDATE',
+            snapLimit: snapLimit === '' ? null : Number(snapLimit),
+          });
+        }
+      });
+    }
+  }, [snapLimit, connections]);
+
+  const handleOpenLimitModal = () => {
+    setLimitInput(snapLimit === '' ? '' : String(snapLimit));
+    setShowLimitModal(true);
+  };
+
+  const handleSaveLimit = () => {
+    const parsed = limitInput === '' ? '' : parseInt(limitInput, 10);
+    const finalLimit = (limitInput === '' || isNaN(parsed) || parsed <= 0) ? '' : parsed;
+    setSnapLimit(finalLimit);
+
+    const activeId = localStorage.getItem('activeEventCode');
+    if (finalLimit === '') {
+      localStorage.removeItem(`snapLimit_${activeId}`);
+    } else {
+      localStorage.setItem(`snapLimit_${activeId}`, String(finalLimit));
+    }
+
+    // Broadcast new limit to all connected guests
+    connections.forEach(conn => {
+      if (conn.open) {
+        conn.send({
+          type: 'SNAP_LIMIT_UPDATE',
+          snapLimit: finalLimit === '' ? null : finalLimit,
+        });
+      }
+    });
+
+    setShowLimitModal(false);
+  };
+
+  const handleClearLimit = () => {
+    setLimitInput('');
+  };
+
   const handleTerminate = () => {
     connections.forEach(conn => {
       if (conn.open) conn.send({ type: 'SESSION_TERMINATED' });
@@ -39,6 +95,7 @@ const HostDashboard = ({ onBack }) => {
     setTimeout(() => {
       localStorage.removeItem('activeEventCode');
       localStorage.removeItem(`gallery_${hostId}`);
+      localStorage.removeItem(`snapLimit_${hostId}`);
       window.location.reload();
     }, 800);
   };
@@ -60,7 +117,7 @@ const HostDashboard = ({ onBack }) => {
   };
 
   const toggleSelectItem = (index) => {
-    setSelectedIndices(prev => 
+    setSelectedIndices(prev =>
       prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
     );
   };
@@ -91,31 +148,38 @@ const HostDashboard = ({ onBack }) => {
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-[500px] bg-blue-600/10 blur-[120px] pointer-events-none" />
 
       <div className="min-h-full p-4 md:p-12 w-full max-w-7xl mx-auto pb-48">
-        
+
         {/* Header Section */}
         <header className="flex items-center justify-between mb-16 relative z-10">
-          <button 
-            onClick={() => onBack ? onBack() : window.location.href = '/'} 
+          <button
+            onClick={() => onBack ? onBack() : window.location.href = '/'}
             className="group flex items-center gap-3 bg-white/5 border border-white/10 px-5 py-2.5 rounded-2xl backdrop-blur-md hover:bg-white/10 transition-all active:scale-95"
           >
             <span className="text-zinc-500 group-hover:text-white transition-colors">←</span>
             <span className="text-[10px] font-black uppercase tracking-[0.2em]">Lobby</span>
           </button>
-          
+
           <div className="flex items-center gap-2 bg-black/40 border border-white/5 p-1.5 rounded-3xl backdrop-blur-2xl">
-            <button 
+            <button
               onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIndices([]); }}
               className={`px-5 py-2 rounded-2xl font-black text-[9px] uppercase tracking-widest transition-all ${isSelectionMode ? 'bg-blue-600 text-white shadow-lg' : 'text-zinc-500 hover:text-white'}`}
             >
               {isSelectionMode ? 'Cancel' : 'Select'}
             </button>
-            <button 
+            {/* Snap Limit Button */}
+            <button
+              onClick={handleOpenLimitModal}
+              className={`px-5 py-2 rounded-2xl font-black text-[9px] uppercase tracking-widest transition-all ${snapLimit !== '' ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' : 'text-zinc-500 hover:text-white'}`}
+            >
+              {snapLimit !== '' ? `Limit: ${snapLimit}` : 'Limit'}
+            </button>
+            <button
               onClick={() => setIsLocked(!isLocked)}
               className={`px-5 py-2 rounded-2xl font-black text-[9px] uppercase tracking-widest transition-all ${isLocked ? 'bg-zinc-800 text-orange-500' : 'text-zinc-500 hover:text-white'}`}
             >
               {isLocked ? 'Locked' : 'Lock'}
             </button>
-            <button 
+            <button
               onClick={() => setShowEndConfirm(true)}
               className="px-5 py-2 rounded-2xl font-black text-[9px] uppercase tracking-widest text-red-500/50 hover:text-red-500 hover:bg-red-500/10 transition-all"
             >
@@ -147,6 +211,15 @@ const HostDashboard = ({ onBack }) => {
               <span className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Captured</span>
               <span className="text-xl font-black text-white">{gallery.length}</span>
             </div>
+            {snapLimit !== '' && (
+              <>
+                <div className="w-px h-8 bg-white/10" />
+                <div className="flex flex-col items-center">
+                  <span className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1">Snap Limit</span>
+                  <span className="text-xl font-black text-blue-400">{snapLimit}</span>
+                </div>
+              </>
+            )}
           </div>
         </section>
 
@@ -156,9 +229,9 @@ const HostDashboard = ({ onBack }) => {
             const isVideo = item && item.startsWith('data:video');
             const isSelected = selectedIndices.includes(i);
             return (
-              <div 
-                key={`${hostId}-${i}`} 
-                onClick={() => isSelectionMode ? toggleSelectItem(i) : setSelectedItem(item)} 
+              <div
+                key={`${hostId}-${i}`}
+                onClick={() => isSelectionMode ? toggleSelectItem(i) : setSelectedItem(item)}
                 className={`group relative aspect-[10/14] rounded-[2rem] md:rounded-[3rem] overflow-hidden bg-zinc-900 border transition-all duration-500 ${
                   isSelected ? 'ring-4 ring-blue-600 scale-[0.96] z-20' : 'border-white/5'
                 } ${isSelectionMode ? 'cursor-default' : 'cursor-pointer hover:border-white/20 hover:-translate-y-2'}`}
@@ -168,10 +241,10 @@ const HostDashboard = ({ onBack }) => {
                 ) : (
                   <img src={item} className="h-full w-full object-cover transition-transform duration-1000 group-hover:scale-110" alt="" />
                 )}
-                
+
                 {/* Visual Identity Overlay */}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 opacity-0 group-hover:opacity-100 transition-opacity" />
-                
+
                 <div className="absolute top-4 left-4 flex gap-2">
                   <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest backdrop-blur-md border border-white/10 ${isVideo ? 'bg-red-500 text-white' : 'bg-white/10 text-white'}`}>
                     {isVideo ? 'Motion' : 'Static'}
@@ -194,16 +267,16 @@ const HostDashboard = ({ onBack }) => {
       {/* Floating Batch Action Bar */}
       {isSelectionMode && selectedIndices.length > 0 && (
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[200] w-[calc(100%-2rem)] max-w-md bg-white text-black p-2 rounded-[2rem] flex items-center justify-between shadow-[0_30px_60px_rgba(0,0,0,0.5)] animate-in slide-in-from-bottom-10">
-            <div className="pl-6">
-                <p className="text-[10px] font-black uppercase tracking-tighter">Ready to Export</p>
-                <p className="text-[9px] font-bold text-zinc-500 uppercase">{selectedIndices.length} items</p>
-            </div>
-            <button 
-                onClick={handleBatchDownload}
-                className="bg-blue-600 text-white px-8 py-4 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all"
-            >
-                Download Bundle
-            </button>
+          <div className="pl-6">
+            <p className="text-[10px] font-black uppercase tracking-tighter">Ready to Export</p>
+            <p className="text-[9px] font-bold text-zinc-500 uppercase">{selectedIndices.length} items</p>
+          </div>
+          <button
+            onClick={handleBatchDownload}
+            className="bg-blue-600 text-white px-8 py-4 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all"
+          >
+            Download Bundle
+          </button>
         </div>
       )}
 
@@ -211,17 +284,17 @@ const HostDashboard = ({ onBack }) => {
       {selectedItem && !isSelectionMode && (
         <div className="fixed inset-0 z-[250] bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 md:p-12 animate-in fade-in" onClick={() => setSelectedItem(null)}>
           <div className="relative max-w-4xl w-full h-full flex flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
-             <div className="w-full h-[70vh] rounded-[3rem] overflow-hidden border border-white/10 bg-zinc-900 shadow-3xl">
-                {selectedItem.startsWith('data:video') ? (
-                  <video src={selectedItem} className="w-full h-full object-contain" controls autoPlay loop playsInline />
-                ) : (
-                  <img src={selectedItem} className="w-full h-full object-contain" alt="" />
-                )}
-             </div>
-             <div className="mt-10 flex gap-4 w-full max-w-sm">
-               <a href={selectedItem} download className="flex-1 bg-white text-black py-5 rounded-[2rem] font-black text-[10px] uppercase tracking-widest text-center hover:scale-105 transition-transform">Save to Device</a>
-               <button onClick={() => setSelectedItem(null)} className="flex-1 bg-white/5 border border-white/10 text-white py-5 rounded-[2rem] font-black text-[10px] uppercase tracking-widest hover:bg-white/10">Dismiss</button>
-             </div>
+            <div className="w-full h-[70vh] rounded-[3rem] overflow-hidden border border-white/10 bg-zinc-900 shadow-3xl">
+              {selectedItem.startsWith('data:video') ? (
+                <video src={selectedItem} className="w-full h-full object-contain" controls autoPlay loop playsInline />
+              ) : (
+                <img src={selectedItem} className="w-full h-full object-contain" alt="" />
+              )}
+            </div>
+            <div className="mt-10 flex gap-4 w-full max-w-sm">
+              <a href={selectedItem} download className="flex-1 bg-white text-black py-5 rounded-[2rem] font-black text-[10px] uppercase tracking-widest text-center hover:scale-105 transition-transform">Save to Device</a>
+              <button onClick={() => setSelectedItem(null)} className="flex-1 bg-white/5 border border-white/10 text-white py-5 rounded-[2rem] font-black text-[10px] uppercase tracking-widest hover:bg-white/10">Dismiss</button>
+            </div>
           </div>
         </div>
       )}
@@ -231,13 +304,65 @@ const HostDashboard = ({ onBack }) => {
         <div className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-xl flex items-center justify-center p-6 animate-in zoom-in-95">
           <div className="bg-[#111] border border-white/5 p-10 rounded-[3.5rem] max-w-sm w-full text-center shadow-3xl">
             <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
-               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </div>
             <h3 className="text-2xl font-black text-white uppercase tracking-tighter italic mb-2">Wipe Session?</h3>
             <p className="text-zinc-500 text-xs font-medium leading-relaxed mb-8 px-4">All captured media will be permanently deleted from the cloud and storage.</p>
             <div className="flex flex-col gap-3">
               <button onClick={handleTerminate} className="bg-red-500 text-white py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px]">Destroy Everything</button>
               <button onClick={() => setShowEndConfirm(false)} className="text-zinc-500 font-bold py-2 uppercase text-[9px] tracking-widest">Keep Session</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Snap Limit Modal */}
+      {showLimitModal && (
+        <div className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-xl flex items-center justify-center p-6 animate-in zoom-in-95">
+          <div className="bg-[#111] border border-white/5 p-10 rounded-[3.5rem] max-w-sm w-full text-center shadow-3xl">
+            <div className="w-16 h-16 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+              </svg>
+            </div>
+            <h3 className="text-2xl font-black text-white uppercase tracking-tighter italic mb-2">Snap Limit</h3>
+            <p className="text-zinc-500 text-xs font-medium leading-relaxed mb-8 px-4">
+              Set the maximum number of snaps each guest can send. Leave empty for unlimited.
+            </p>
+
+            <div className="relative mb-8">
+              <input
+                type="number"
+                min="1"
+                placeholder="∞"
+                className="w-full bg-black/40 border-2 border-white/5 focus:border-blue-500/50 py-6 rounded-3xl text-center text-4xl font-mono font-black outline-none transition-all text-blue-400 placeholder:text-zinc-700 focus:bg-black/60"
+                value={limitInput}
+                onChange={e => setLimitInput(e.target.value)}
+              />
+              {limitInput !== '' && (
+                <button
+                  onClick={handleClearLimit}
+                  className="absolute right-5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-white transition-colors text-[9px] font-black uppercase tracking-widest"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={handleSaveLimit}
+                className="bg-blue-600 text-white py-5 rounded-[1.5rem] font-black uppercase tracking-widest text-[10px] active:scale-95 transition-all"
+              >
+                {limitInput === '' ? 'Set Unlimited' : `Set Limit to ${limitInput}`}
+              </button>
+              <button
+                onClick={() => setShowLimitModal(false)}
+                className="text-zinc-500 font-bold py-2 uppercase text-[9px] tracking-widest"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>
